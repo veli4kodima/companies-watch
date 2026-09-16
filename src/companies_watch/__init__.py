@@ -1,2 +1,7 @@
+from companies_watch.config import get_settings
+
+
 def main() -> None:
-    print("Hello from companies-watch!")
+    settings = get_settings()
+    print(settings.database_url)
+    print(settings)
