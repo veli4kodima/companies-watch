@@ -13,9 +13,8 @@ def main() -> None:
 
     with psycopg.connect(
         settings.database_url, autocommit=True, connect_timeout=5
-    ) as conn:
-        with conn.transaction():
-            upsert_company(conn, company)
+    ) as conn, conn.transaction():
+        upsert_company(conn, company)
 
     print(f"saved {company['company_number']} {company['company_name']}")
 
