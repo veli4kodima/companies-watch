@@ -1,4 +1,4 @@
-from datetime import UTC, datetime
+from datetime import UTC, datetime, timedelta
 from typing import Any
 
 import psycopg
@@ -28,4 +28,69 @@ def upsert_company(conn: psycopg.Connection[TupleRow], data: dict[str, Any]) -> 
             Jsonb(data),
             datetime.now(tz=UTC),
         ),
+    )
+
+def add_to_watchlist(conn: psycopg.Connection[TupleRow], number: str) -> bool:
+    cursor = conn.execute(
+        """
+        insert into watchlist (company_number)
+        values (%s)
+        on conflict (company_number) do nothing
+        """,
+        (number,),
+    )
+    return cursor.rowcount == 1
+
+def claim_due(
+    conn: psycopg.Connection[TupleRow], limit: int, lease: timedelta
+) -> list[str]:
+    cursor = conn.execute(
+        """
+        with due as (
+            select company_number
+            from watchlist
+            where paused_at is null
+              and next_check_at <= now()
+            order by next_check_at
+            limit %s
+            for update skip locked
+        )
+        update watchlist w
+        set next_check_at = now() + %s
+        from due
+        where w.company_number = due.company_number
+        returning w.company_number
+        """,
+        (limit, lease),
+    )
+    return [row[0] for row in cursor]
+
+def mark_success(
+    conn: psycopg.Connection[TupleRow], number: str, interval: timedelta
+) -> None:
+    conn.execute(
+        """
+        update watchlist
+        set last_checked_at = now(),
+            next_check_at   = now() + %s,
+            fail_count      = 0,
+            paused_at       = null,
+            pause_reason    = null
+        where company_number = %s
+        """,
+        (interval, number),
+    )
+
+def mark_failure(
+    conn: psycopg.Connection[TupleRow], number: str, retry_in: timedelta
+) -> None:
+    conn.execute(
+        """
+        update watchlist
+        set last_checked_at = now(),
+            next_check_at   = now() + %s,
+            fail_count      = fail_count + 1
+        where company_number = %s
+        """,
+        (retry_in, number),
     )
