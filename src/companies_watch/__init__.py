@@ -16,12 +16,14 @@ from companies_watch.store import (
     claim_due,
     mark_failure,
     mark_success,
+    resume_watch,
     upsert_company,
 )
 
 WATCH_INTERVAL = timedelta(hours=24)
 RETRY_INTERVAL = timedelta(hours=1)
 LEASE = timedelta(minutes=30)
+MAX_FAILS = 5
 
 
 def cmd_fetch(number: str, dry_run: bool) -> None:
@@ -53,6 +55,17 @@ def cmd_watch_add(number: str) -> None:
 
     print(f"{'added' if added else 'already present'} {normalized}")
 
+def cmd_watch_resume(number: str) -> None:
+    settings = get_settings()
+    normalized = normalize_number(number)
+
+    with psycopg.connect(
+        settings.database_url, autocommit=True, connect_timeout=5
+    ) as conn, conn.transaction():
+        resumed = resume_watch(conn, normalized)
+
+    print(f"{'resumed' if resumed else 'not paused'} {normalized}")
+
 
 def cmd_run(limit: int) -> None:
     settings = get_settings()
@@ -75,8 +88,8 @@ def cmd_run(limit: int) -> None:
                     company = get_company(client, number)
                 except (CompanyNotFound, httpx.HTTPError) as exc:
                     with conn.transaction():
-                        mark_failure(conn, number, RETRY_INTERVAL)
-                    print(f"failed {number}: {exc!r}")
+                        paused = mark_failure(conn, number, RETRY_INTERVAL, MAX_FAILS)
+                    print(f"failed {number}: {exc!r}{' -> paused' if paused else ''}")
                     failed += 1
                     continue
 
@@ -100,6 +113,8 @@ def main() -> None:
     watch_sub = watch.add_subparsers(dest="watch_command", required=True)
     watch_add = watch_sub.add_parser("add", help="add a company to the watchlist")
     watch_add.add_argument("number")
+    watch_resume = watch_sub.add_parser("resume", help="unpause a company")
+    watch_resume.add_argument("number")
 
     run = sub.add_parser("run", help="process due companies")
     run.add_argument("--limit", type=int, default=50)
@@ -110,5 +125,7 @@ def main() -> None:
         cmd_fetch(args.number, args.dry_run)
     elif args.command == "watch" and args.watch_command == "add":
         cmd_watch_add(args.number)
+    elif args.command == "watch" and args.watch_command == "resume":
+        cmd_watch_resume(args.number)
     elif args.command == "run":
         cmd_run(args.limit)

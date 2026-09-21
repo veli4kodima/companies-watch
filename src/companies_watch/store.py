@@ -82,15 +82,44 @@ def mark_success(
     )
 
 def mark_failure(
-    conn: psycopg.Connection[TupleRow], number: str, retry_in: timedelta
-) -> None:
-    conn.execute(
+    conn: psycopg.Connection[TupleRow],
+    number: str,
+    retry_in: timedelta,
+    max_fails: int,
+) -> bool:
+    row = conn.execute(
         """
         update watchlist
         set last_checked_at = now(),
-            next_check_at   = now() + %s,
-            fail_count      = fail_count + 1
-        where company_number = %s
+            next_check_at   = now() + %(retry_in)s,
+            fail_count      = fail_count + 1,
+            paused_at       = case when fail_count + 1 >= %(max_fails)s
+                                   then now() else paused_at end,
+            pause_reason    = case when fail_count + 1 >= %(max_fails)s
+                                   then %(reason)s else pause_reason end
+        where company_number = %(number)s
+        returning paused_at is not null
         """,
-        (retry_in, number),
+        {
+            "number": number,
+            "retry_in": retry_in,
+            "max_fails": max_fails,
+            "reason": f"{max_fails} consecutive failures",
+        },
+    ).fetchone()
+    return bool(row and row[0])
+
+def resume_watch(conn: psycopg.Connection[TupleRow], number: str) -> bool:
+    cursor = conn.execute(
+        """
+        update watchlist
+        set paused_at     = null,
+            pause_reason  = null,
+            fail_count    = 0,
+            next_check_at = now()
+        where company_number = %s
+          and paused_at is not null
+        """,
+        (number,),
     )
+    return cursor.rowcount == 1
