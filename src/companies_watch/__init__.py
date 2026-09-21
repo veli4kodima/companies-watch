@@ -15,6 +15,7 @@ from companies_watch.store import (
     add_to_watchlist,
     claim_due,
     mark_failure,
+    mark_gone,
     mark_success,
     resume_watch,
     upsert_company,
@@ -82,11 +83,18 @@ def cmd_run(limit: int) -> None:
 
         ok = 0
         failed = 0
+        gone = 0
         with make_client(settings.ch_api_key.get_secret_value()) as client:
             for number in numbers:
                 try:
                     company = get_company(client, number)
-                except (CompanyNotFound, httpx.HTTPError) as exc:
+                except CompanyNotFound:
+                    with conn.transaction():
+                        mark_gone(conn, number)
+                    print(f"gone {number}")
+                    gone += 1
+                    continue
+                except httpx.HTTPError as exc:
                     with conn.transaction():
                         paused = mark_failure(conn, number, RETRY_INTERVAL, MAX_FAILS)
                     print(f"failed {number}: {exc!r}{' -> paused' if paused else ''}")
@@ -98,7 +106,10 @@ def cmd_run(limit: int) -> None:
                     mark_success(conn, number, WATCH_INTERVAL)
                 ok += 1
 
-        print(f"run finished: {ok} ok, {failed} failed, {len(numbers)} claimed")
+            print(
+                f"run finished: {ok} ok, {failed} failed, {gone} gone, "
+                f"{len(numbers)} claimed"
+            )
 
 
 def main() -> None:

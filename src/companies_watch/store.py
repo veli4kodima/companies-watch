@@ -50,6 +50,7 @@ def claim_due(
             select company_number
             from watchlist
             where paused_at is null
+              and gone_at is null
               and next_check_at <= now()
             order by next_check_at
             limit %s
@@ -75,7 +76,8 @@ def mark_success(
             next_check_at   = now() + %s,
             fail_count      = 0,
             paused_at       = null,
-            pause_reason    = null
+            pause_reason    = null,
+            gone_at         = null
         where company_number = %s
         """,
         (interval, number),
@@ -109,16 +111,30 @@ def mark_failure(
     ).fetchone()
     return bool(row and row[0])
 
+def mark_gone(conn: psycopg.Connection[TupleRow], number: str) -> None:
+    conn.execute(
+        """
+        update watchlist
+        set gone_at         = now(),
+            last_checked_at = now(),
+            paused_at       = null,
+            pause_reason    = null
+        where company_number = %s
+        """,
+        (number,),
+    )
+
 def resume_watch(conn: psycopg.Connection[TupleRow], number: str) -> bool:
     cursor = conn.execute(
         """
-        update watchlist
-        set paused_at     = null,
-            pause_reason  = null,
-            fail_count    = 0,
-            next_check_at = now()
-        where company_number = %s
-          and paused_at is not null
+            update watchlist
+            set paused_at     = null,
+                pause_reason  = null,
+                gone_at       = null,
+                fail_count    = 0,
+                next_check_at = now()
+            where company_number = %s
+              and (paused_at is not null or gone_at is not null)
         """,
         (number,),
     )
