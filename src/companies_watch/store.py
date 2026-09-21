@@ -5,6 +5,8 @@ import psycopg
 from psycopg.rows import TupleRow
 from psycopg.types.json import Jsonb
 
+from companies_watch.changes import diff_fields
+
 
 def upsert_company(conn: psycopg.Connection[TupleRow], data: dict[str, Any]) -> None:
     conn.execute(
@@ -29,6 +31,38 @@ def upsert_company(conn: psycopg.Connection[TupleRow], data: dict[str, Any]) -> 
             datetime.now(tz=UTC),
         ),
     )
+
+def _jsonb_or_null(value: Any) -> Jsonb | None:
+    return None if value is None else Jsonb(value)
+
+
+def save_company(conn: psycopg.Connection[TupleRow], data: dict[str, Any]) -> list[str]:
+    number = data["company_number"]
+    row = conn.execute(
+        "select raw, etag from companies where company_number = %s for update",
+        (number,),
+    ).fetchone()
+
+    if row is None:
+        upsert_company(conn, data)
+        return []
+
+    old_raw, old_etag = row
+    if old_etag is not None and old_etag == data.get("etag"):
+        return []
+
+    changes = diff_fields(old_raw, data)
+    for field, old_value, new_value in changes:
+        conn.execute(
+            """
+            insert into company_changes (company_number, field, old_value, new_value)
+            values (%s, %s, %s, %s)
+            """,
+            (number, field, _jsonb_or_null(old_value), _jsonb_or_null(new_value)),
+        )
+
+    upsert_company(conn, data)
+    return [field for field, _, _ in changes]
 
 def add_to_watchlist(conn: psycopg.Connection[TupleRow], number: str) -> bool:
     cursor = conn.execute(

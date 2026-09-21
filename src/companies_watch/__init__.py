@@ -18,7 +18,7 @@ from companies_watch.store import (
     mark_gone,
     mark_success,
     resume_watch,
-    upsert_company,
+    save_company,
 )
 
 WATCH_INTERVAL = timedelta(hours=24)
@@ -40,7 +40,10 @@ def cmd_fetch(number: str, dry_run: bool) -> None:
     with psycopg.connect(
         settings.database_url, autocommit=True, connect_timeout=5
     ) as conn, conn.transaction():
-        upsert_company(conn, company)
+        changed = save_company(conn, company)
+
+    if changed:
+        print(f"changed: {', '.join(changed)}")
 
     print(f"saved {company['company_number']} {company['company_name']}")
 
@@ -102,14 +105,16 @@ def cmd_run(limit: int) -> None:
                     continue
 
                 with conn.transaction():
-                    upsert_company(conn, company)
+                    changed = save_company(conn, company)
                     mark_success(conn, number, WATCH_INTERVAL)
+                if changed:
+                    print(f"changed {number}: {', '.join(changed)}")
                 ok += 1
 
-            print(
-                f"run finished: {ok} ok, {failed} failed, {gone} gone, "
-                f"{len(numbers)} claimed"
-            )
+        print(
+            f"run finished: {ok} ok, {failed} failed, {gone} gone, "
+            f"{len(numbers)} claimed"
+        )
 
 
 def main() -> None:
