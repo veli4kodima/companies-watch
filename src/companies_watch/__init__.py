@@ -1,10 +1,13 @@
 import argparse
+import logging
+import sys
 from collections.abc import Callable
 from datetime import timedelta
 from functools import partial
 
 import httpx
 import psycopg
+from pydantic import ValidationError
 
 from companies_watch.client import (
     CompanyNotFound,
@@ -13,6 +16,7 @@ from companies_watch.client import (
     normalize_number,
 )
 from companies_watch.config import get_settings
+from companies_watch.logs import setup_logging
 from companies_watch.retry import call_with_retry
 from companies_watch.runlog import (
     RunStats,
@@ -37,7 +41,7 @@ RETRY_INTERVAL = timedelta(hours=1)
 LEASE = timedelta(minutes=30)
 MAX_FAILS = 5
 STALE_AFTER = timedelta(minutes=15)
-
+log = logging.getLogger("companies_watch")
 
 def cmd_fetch(number: str, dry_run: bool) -> None:
     settings = get_settings()
@@ -83,7 +87,7 @@ def cmd_watch_resume(number: str) -> None:
     print(f"{'resumed' if resumed else 'not paused'} {normalized}")
 
 
-def cmd_run(limit: int) -> None:
+def cmd_run(limit: int) -> int:
     settings = get_settings()
 
     with psycopg.connect(
@@ -91,7 +95,7 @@ def cmd_run(limit: int) -> None:
     ) as conn:
         abandoned = abandon_stale(conn, STALE_AFTER)
         if abandoned:
-            print(f"marked {abandoned} stale run(s) as abandoned")
+            log.warning("marked %d stale run(s) as abandoned", abandoned)
 
         run_id = start_run(conn)
         stats = RunStats()
@@ -103,7 +107,7 @@ def cmd_run(limit: int) -> None:
                 update_run(conn, run_id, stats)
 
             if not numbers:
-                print("nothing due")
+                log.info("nothing due")
             else:
                 with make_client(settings.ch_api_key.get_secret_value()) as client:
                     def make_on_retry(
@@ -114,9 +118,7 @@ def cmd_run(limit: int) -> None:
                         ) -> None:
                             stats.retries += 1
                             update_run(conn, run_id, stats)
-                            print(
-                                f"retry {number} #{attempt} in {delay:.1f}s: {exc!r}"
-                            )
+                            log.warning("retry %s #%d in %.1fs: %r", number, attempt, delay, exc)
 
                         return on_retry
 
@@ -131,7 +133,7 @@ def cmd_run(limit: int) -> None:
                                 mark_gone(conn, number)
                                 stats.gone += 1
                                 update_run(conn, run_id, stats)
-                            print(f"gone {number}")
+                            log.info("gone %s", number)
                             continue
                         except httpx.HTTPError as exc:
                             with conn.transaction():
@@ -140,10 +142,7 @@ def cmd_run(limit: int) -> None:
                                 )
                                 stats.failed += 1
                                 update_run(conn, run_id, stats)
-                            print(
-                                f"failed {number}: {exc!r}"
-                                f"{' -> paused' if paused else ''}"
-                            )
+                                log.warning("failed %s: %r%s", number, exc, " -> paused" if paused else "")
                             continue
 
                         with conn.transaction():
@@ -154,16 +153,19 @@ def cmd_run(limit: int) -> None:
                                 stats.changed += 1
                             update_run(conn, run_id, stats)
                         if changed:
-                            print(f"changed {number}: {', '.join(changed)}")
+                            log.info("changed %s: %s", number, ", ".join(changed))
         except BaseException as exc:
             finish_run(conn, run_id, stats, "error", repr(exc))
             raise
 
         finish_run(conn, run_id, stats, "completed")
-        print(
-            f"run #{run_id} finished: {stats.ok} ok, {stats.failed} failed, "
-            f"{stats.gone} gone, {stats.changed} changed, {stats.taken} claimed"
+        log.info(
+           "run #%d finished: %d ok, %d failed, %d gone, %d changed, %d claimed",
+           run_id, stats.ok, stats.failed, stats.gone, stats.changed, stats.taken,
         )
+        if stats.taken > 0 and stats.ok == 0 and stats.gone == 0:
+           return 1
+        return 0
 
 def cmd_status() -> None:
     settings = get_settings()
@@ -173,7 +175,7 @@ def cmd_status() -> None:
         status = load_status(conn)
     print(render(status, STALE_AFTER))
 
-def main() -> None:
+def main() -> int:
     parser = argparse.ArgumentParser(prog="companies-watch")
     sub = parser.add_subparsers(dest="command", required=True)
 
@@ -194,13 +196,26 @@ def main() -> None:
 
     args = parser.parse_args()
 
-    if args.command == "fetch":
-        cmd_fetch(args.number, args.dry_run)
-    elif args.command == "watch" and args.watch_command == "add":
-        cmd_watch_add(args.number)
-    elif args.command == "watch" and args.watch_command == "resume":
-        cmd_watch_resume(args.number)
-    elif args.command == "run":
-        cmd_run(args.limit)
-    elif args.command == "status":
-        cmd_status()
+    setup_logging()
+
+    try:
+        if args.command == "fetch":
+            cmd_fetch(args.number, args.dry_run)
+        elif args.command == "run":
+            return cmd_run(args.limit)
+        elif args.command == "status":
+            cmd_status()
+        # ... остальные ветки ...
+    except ValidationError as exc:
+        print(f"configuration error: {exc}", file=sys.stderr)
+        return 2
+    except ValueError as exc:
+        print(f"error: {exc}", file=sys.stderr)
+        return 2
+    except psycopg.OperationalError as exc:
+        print(f"database unavailable: {exc}", file=sys.stderr)
+        return 3
+    except KeyboardInterrupt:
+        print("interrupted", file=sys.stderr)
+        return 130
+    return 0
