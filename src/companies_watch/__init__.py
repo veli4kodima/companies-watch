@@ -1,5 +1,7 @@
 import argparse
+from collections.abc import Callable
 from datetime import timedelta
+from functools import partial
 
 import httpx
 import psycopg
@@ -11,6 +13,7 @@ from companies_watch.client import (
     normalize_number,
 )
 from companies_watch.config import get_settings
+from companies_watch.retry import call_with_retry
 from companies_watch.runlog import (
     RunStats,
     abandon_stale,
@@ -103,9 +106,26 @@ def cmd_run(limit: int) -> None:
                 print("nothing due")
             else:
                 with make_client(settings.ch_api_key.get_secret_value()) as client:
+                    def make_on_retry(
+                        number: str,
+                    ) -> Callable[[int, Exception, float], None]:
+                        def on_retry(
+                            attempt: int, exc: Exception, delay: float
+                        ) -> None:
+                            stats.retries += 1
+                            update_run(conn, run_id, stats)
+                            print(
+                                f"retry {number} #{attempt} in {delay:.1f}s: {exc!r}"
+                            )
+
+                        return on_retry
+
                     for number in numbers:
                         try:
-                            company = get_company(client, number)
+                            company = call_with_retry(
+                                partial(get_company, client, number),
+                                make_on_retry(number),
+                            )
                         except CompanyNotFound:
                             with conn.transaction():
                                 mark_gone(conn, number)
