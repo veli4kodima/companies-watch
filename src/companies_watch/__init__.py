@@ -18,6 +18,7 @@ from companies_watch.runlog import (
     start_run,
     update_run,
 )
+from companies_watch.status import load_status, render
 from companies_watch.store import (
     add_to_watchlist,
     claim_due,
@@ -144,6 +145,13 @@ def cmd_run(limit: int) -> None:
             f"{stats.gone} gone, {stats.changed} changed, {stats.taken} claimed"
         )
 
+def cmd_status() -> None:
+    settings = get_settings()
+    with psycopg.connect(
+        settings.database_url, autocommit=True, connect_timeout=5
+    ) as conn:
+        status = load_status(conn)
+    print(render(status, STALE_AFTER))
 
 def main() -> None:
     parser = argparse.ArgumentParser(prog="companies-watch")
@@ -161,6 +169,7 @@ def main() -> None:
     watch_resume.add_argument("number")
 
     run = sub.add_parser("run", help="process due companies")
+    sub.add_parser("status", help="show pipeline state")
     run.add_argument("--limit", type=int, default=50)
 
     args = parser.parse_args()
@@ -173,3 +182,5 @@ def main() -> None:
         cmd_watch_resume(args.number)
     elif args.command == "run":
         cmd_run(args.limit)
+    elif args.command == "status":
+        cmd_status()
