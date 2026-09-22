@@ -11,6 +11,13 @@ from companies_watch.client import (
     normalize_number,
 )
 from companies_watch.config import get_settings
+from companies_watch.runlog import (
+    RunStats,
+    abandon_stale,
+    finish_run,
+    start_run,
+    update_run,
+)
 from companies_watch.store import (
     add_to_watchlist,
     claim_due,
@@ -25,6 +32,7 @@ WATCH_INTERVAL = timedelta(hours=24)
 RETRY_INTERVAL = timedelta(hours=1)
 LEASE = timedelta(minutes=30)
 MAX_FAILS = 5
+STALE_AFTER = timedelta(minutes=15)
 
 
 def cmd_fetch(number: str, dry_run: bool) -> None:
@@ -77,43 +85,63 @@ def cmd_run(limit: int) -> None:
     with psycopg.connect(
         settings.database_url, autocommit=True, connect_timeout=5
     ) as conn:
-        with conn.transaction():
-            numbers = claim_due(conn, limit, LEASE)
+        abandoned = abandon_stale(conn, STALE_AFTER)
+        if abandoned:
+            print(f"marked {abandoned} stale run(s) as abandoned")
 
-        if not numbers:
-            print("nothing due")
-            return
+        run_id = start_run(conn)
+        stats = RunStats()
 
-        ok = 0
-        failed = 0
-        gone = 0
-        with make_client(settings.ch_api_key.get_secret_value()) as client:
-            for number in numbers:
-                try:
-                    company = get_company(client, number)
-                except CompanyNotFound:
-                    with conn.transaction():
-                        mark_gone(conn, number)
-                    print(f"gone {number}")
-                    gone += 1
-                    continue
-                except httpx.HTTPError as exc:
-                    with conn.transaction():
-                        paused = mark_failure(conn, number, RETRY_INTERVAL, MAX_FAILS)
-                    print(f"failed {number}: {exc!r}{' -> paused' if paused else ''}")
-                    failed += 1
-                    continue
+        try:
+            with conn.transaction():
+                numbers = claim_due(conn, limit, LEASE)
+                stats.taken = len(numbers)
+                update_run(conn, run_id, stats)
 
-                with conn.transaction():
-                    changed = save_company(conn, company)
-                    mark_success(conn, number, WATCH_INTERVAL)
-                if changed:
-                    print(f"changed {number}: {', '.join(changed)}")
-                ok += 1
+            if not numbers:
+                print("nothing due")
+            else:
+                with make_client(settings.ch_api_key.get_secret_value()) as client:
+                    for number in numbers:
+                        try:
+                            company = get_company(client, number)
+                        except CompanyNotFound:
+                            with conn.transaction():
+                                mark_gone(conn, number)
+                                stats.gone += 1
+                                update_run(conn, run_id, stats)
+                            print(f"gone {number}")
+                            continue
+                        except httpx.HTTPError as exc:
+                            with conn.transaction():
+                                paused = mark_failure(
+                                    conn, number, RETRY_INTERVAL, MAX_FAILS
+                                )
+                                stats.failed += 1
+                                update_run(conn, run_id, stats)
+                            print(
+                                f"failed {number}: {exc!r}"
+                                f"{' -> paused' if paused else ''}"
+                            )
+                            continue
 
+                        with conn.transaction():
+                            changed = save_company(conn, company)
+                            mark_success(conn, number, WATCH_INTERVAL)
+                            stats.ok += 1
+                            if changed:
+                                stats.changed += 1
+                            update_run(conn, run_id, stats)
+                        if changed:
+                            print(f"changed {number}: {', '.join(changed)}")
+        except BaseException as exc:
+            finish_run(conn, run_id, stats, "error", repr(exc))
+            raise
+
+        finish_run(conn, run_id, stats, "completed")
         print(
-            f"run finished: {ok} ok, {failed} failed, {gone} gone, "
-            f"{len(numbers)} claimed"
+            f"run #{run_id} finished: {stats.ok} ok, {stats.failed} failed, "
+            f"{stats.gone} gone, {stats.changed} changed, {stats.taken} claimed"
         )
 
 
