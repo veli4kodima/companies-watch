@@ -34,6 +34,3 @@ def get_company(client: httpx.Client, number: str) -> dict[str, Any]:
     response.raise_for_status()
     data: dict[str, Any] = response.json()
     return data
-
-
-

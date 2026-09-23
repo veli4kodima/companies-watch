@@ -32,9 +32,7 @@ def abandon_stale(conn: Connection[TupleRow], stale_after: timedelta) -> int:
 
 
 def start_run(conn: Connection[TupleRow]) -> int:
-    row = conn.execute(
-        "insert into refresh_log default values returning id"
-    ).fetchone()
+    row = conn.execute("insert into refresh_log default values returning id").fetchone()
     assert row is not None
     return int(row[0])
 

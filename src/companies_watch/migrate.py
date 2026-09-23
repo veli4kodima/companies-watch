@@ -9,7 +9,9 @@ MIGRATIONS_DIR = Path(__file__).resolve().parents[2] / "migrations"
 LOCK_ID = 727001  # произвольное число для advisory lock
 
 
-def apply_migrations(conn: psycopg.Connection[TupleRow], migrations_dir: Path) -> list[str]:
+def apply_migrations(
+    conn: psycopg.Connection[TupleRow], migrations_dir: Path
+) -> list[str]:
     conn.execute(
         """
         create table if not exists schema_migrations (

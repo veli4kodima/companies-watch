@@ -9,9 +9,7 @@ TRACKED_FIELDS = (
 )
 
 
-def diff_fields(
-    old: dict[str, Any], new: dict[str, Any]
-) -> list[tuple[str, Any, Any]]:
+def diff_fields(old: dict[str, Any], new: dict[str, Any]) -> list[tuple[str, Any, Any]]:
     return [
         (field, old.get(field), new.get(field))
         for field in TRACKED_FIELDS

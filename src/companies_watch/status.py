@@ -81,6 +81,7 @@ class LastRun:
     changed_count: int
     error_message: str | None
 
+
 @dataclass
 class RunningRun:
     id: int
@@ -204,9 +205,7 @@ def render(status: Status, stale_after: timedelta) -> str:
     if status.last_completed_ago is None:
         lines.append("Last success  never")
     else:
-        lines.append(
-            f"Last success  {fmt_duration(status.last_completed_ago)} ago"
-        )
+        lines.append(f"Last success  {fmt_duration(status.last_completed_ago)} ago")
 
     q = status.queue
     if q.next_check_in is None:

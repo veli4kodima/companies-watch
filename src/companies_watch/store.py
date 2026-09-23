@@ -32,6 +32,7 @@ def upsert_company(conn: psycopg.Connection[TupleRow], data: dict[str, Any]) -> 
         ),
     )
 
+
 def _jsonb_or_null(value: Any) -> Jsonb | None:
     return None if value is None else Jsonb(value)
 
@@ -64,6 +65,7 @@ def save_company(conn: psycopg.Connection[TupleRow], data: dict[str, Any]) -> li
     upsert_company(conn, data)
     return [field for field, _, _ in changes]
 
+
 def add_to_watchlist(conn: psycopg.Connection[TupleRow], number: str) -> bool:
     cursor = conn.execute(
         """
@@ -74,6 +76,7 @@ def add_to_watchlist(conn: psycopg.Connection[TupleRow], number: str) -> bool:
         (number,),
     )
     return cursor.rowcount == 1
+
 
 def claim_due(
     conn: psycopg.Connection[TupleRow], limit: int, lease: timedelta
@@ -100,6 +103,7 @@ def claim_due(
     )
     return [row[0] for row in cursor]
 
+
 def mark_success(
     conn: psycopg.Connection[TupleRow], number: str, interval: timedelta
 ) -> None:
@@ -116,6 +120,7 @@ def mark_success(
         """,
         (interval, number),
     )
+
 
 def mark_failure(
     conn: psycopg.Connection[TupleRow],
@@ -145,6 +150,7 @@ def mark_failure(
     ).fetchone()
     return bool(row and row[0])
 
+
 def mark_gone(conn: psycopg.Connection[TupleRow], number: str) -> None:
     conn.execute(
         """
@@ -157,6 +163,7 @@ def mark_gone(conn: psycopg.Connection[TupleRow], number: str) -> None:
         """,
         (number,),
     )
+
 
 def resume_watch(conn: psycopg.Connection[TupleRow], number: str) -> bool:
     cursor = conn.execute(

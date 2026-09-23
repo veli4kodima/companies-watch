@@ -49,6 +49,7 @@ def test_does_not_retry_4xx() -> None:
         call_with_retry(fn, sleep=no_sleep)
     assert fn.calls == 1
 
+
 class Recorder:
     """Фейковый sleep: не спит, но запоминает длительности."""
 
