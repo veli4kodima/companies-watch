@@ -4,6 +4,7 @@ import sys
 import psycopg
 from pydantic import ValidationError
 
+from companies_watch import migrate
 from companies_watch.commands import (
     cmd_fetch,
     cmd_run,
@@ -35,6 +36,7 @@ def build_parser() -> argparse.ArgumentParser:
     run.add_argument("--limit", type=int, default=50)
 
     sub.add_parser("status", help="show pipeline state")
+    sub.add_parser("migrate", help="apply pending migrations")
 
     return parser
 
@@ -59,6 +61,8 @@ def main() -> int:
             return cmd_run(args.limit)
         elif args.command == "status":
             cmd_status()
+        elif args.command == "migrate":
+            migrate.main()
         else:
             parser.error(f"unknown command: {args.command}")
     except ValidationError as exc:
