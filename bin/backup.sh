@@ -23,6 +23,7 @@ RCLONE_CONFIG_B2_TYPE=b2
 RCLONE_CONFIG_B2_ACCOUNT=$(env_get B2_KEY_ID)
 RCLONE_CONFIG_B2_KEY=$(env_get B2_APP_KEY)
 export RCLONE_CONFIG_B2_TYPE RCLONE_CONFIG_B2_ACCOUNT RCLONE_CONFIG_B2_KEY
+rc() { rclone --config "" "$@"; }
 
 : "${DATABASE_URL:?DATABASE_URL is empty}"
 : "${BUCKET:?B2_BUCKET is empty}"
@@ -39,10 +40,10 @@ age -r "$RECIPIENT" -o "$WORK/$NAME" "$WORK/db.dump"
 LOCAL_SIZE=$(stat -c %s "$WORK/$NAME")
 LOCAL_SHA=$(sha256sum "$WORK/$NAME" | cut -d ' ' -f 1)
 
-rclone copyto "$WORK/$NAME" "b2:$BUCKET/$NAME"
+rc copyto "$WORK/$NAME" "b2:$BUCKET/$NAME"
 
-REMOTE_SIZE=$(rclone lsf --format s "b2:$BUCKET/$NAME")
-REMOTE_SHA=$(rclone cat "b2:$BUCKET/$NAME" | sha256sum | cut -d ' ' -f 1)
+REMOTE_SIZE=$(rc lsf --format s "b2:$BUCKET/$NAME")
+REMOTE_SHA=$(rc cat "b2:$BUCKET/$NAME" | sha256sum | cut -d ' ' -f 1)
 
 if [ "$REMOTE_SIZE" != "$LOCAL_SIZE" ]; then
     echo "size mismatch: local $LOCAL_SIZE, remote $REMOTE_SIZE" >&2
@@ -54,6 +55,6 @@ if [ "$REMOTE_SHA" != "$LOCAL_SHA" ]; then
 fi
 
 echo "$LOCAL_SHA  $NAME" > "$WORK/$NAME.sha256"
-rclone copyto "$WORK/$NAME.sha256" "b2:$BUCKET/$NAME.sha256"
+rc copyto "$WORK/$NAME.sha256" "b2:$BUCKET/$NAME.sha256"
 
 echo "backup ok: $NAME, $LOCAL_SIZE bytes, sha256 $LOCAL_SHA" >&2
