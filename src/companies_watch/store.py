@@ -180,3 +180,17 @@ def resume_watch(conn: psycopg.Connection[TupleRow], number: str) -> bool:
         (number,),
     )
     return cursor.rowcount == 1
+
+
+IMPORT_WATCHLIST_SQL = """
+    insert into watchlist (company_number, next_check_at)
+    select number, now() + random() * interval '1 day'
+    from unnest(%s::text[]) as t(number)
+    on conflict (company_number) do nothing
+    returning company_number
+"""
+
+
+def import_watchlist(conn: psycopg.Connection[Any], numbers: list[str]) -> int:
+    rows = conn.execute(IMPORT_WATCHLIST_SQL, (numbers,)).fetchall()
+    return len(rows)

@@ -1,15 +1,18 @@
 import argparse
 import sys
+from datetime import date
 
 import psycopg
 from pydantic import ValidationError
 
 from companies_watch import migrate
 from companies_watch.commands import (
+    cmd_discover,
     cmd_fetch,
     cmd_run,
     cmd_status,
     cmd_watch_add,
+    cmd_watch_import,
     cmd_watch_resume,
 )
 from companies_watch.logs import setup_logging
@@ -27,8 +30,15 @@ def build_parser() -> argparse.ArgumentParser:
 
     watch = sub.add_parser("watch", help="manage the watchlist")
     watch_sub = watch.add_subparsers(dest="watch_command", required=True)
+
     watch_add = watch_sub.add_parser("add", help="add a company to the watchlist")
     watch_add.add_argument("number")
+
+    watch_import = watch_sub.add_parser(
+        "import", help="add numbers from a file ('-' for stdin)"
+    )
+    watch_import.add_argument("path")
+
     watch_resume = watch_sub.add_parser("resume", help="unpause a company")
     watch_resume.add_argument("number")
 
@@ -37,6 +47,15 @@ def build_parser() -> argparse.ArgumentParser:
 
     sub.add_parser("status", help="show pipeline state")
     sub.add_parser("migrate", help="apply pending migrations")
+
+    discover = sub.add_parser(
+        "discover", help="search Companies House, print numbers to stdout"
+    )
+    discover.add_argument("--status")
+    discover.add_argument("--sic", action="append", dest="sic_codes")
+    discover.add_argument("--from", dest="incorporated_from", type=date.fromisoformat)
+    discover.add_argument("--to", dest="incorporated_to", type=date.fromisoformat)
+    discover.add_argument("--size", type=int, default=100)
 
     return parser
 
@@ -53,6 +72,8 @@ def main() -> int:
         elif args.command == "watch":
             if args.watch_command == "add":
                 cmd_watch_add(args.number)
+            elif args.watch_command == "import":
+                return cmd_watch_import(args.path)
             elif args.watch_command == "resume":
                 cmd_watch_resume(args.number)
             else:
@@ -63,6 +84,14 @@ def main() -> int:
             cmd_status()
         elif args.command == "migrate":
             migrate.main()
+        elif args.command == "discover":
+            return cmd_discover(
+                status=args.status,
+                sic_codes=args.sic_codes,
+                incorporated_from=args.incorporated_from,
+                incorporated_to=args.incorporated_to,
+                size=args.size,
+            )
         else:
             parser.error(f"unknown command: {args.command}")
     except ValidationError as exc:

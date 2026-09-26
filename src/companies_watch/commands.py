@@ -1,6 +1,7 @@
 import logging
-from collections.abc import Callable
-from datetime import timedelta
+import sys
+from collections.abc import Callable, Iterable
+from datetime import date, timedelta
 from functools import partial
 
 import httpx
@@ -11,6 +12,7 @@ from companies_watch.client import (
     get_company,
     make_client,
     normalize_number,
+    search_companies,
 )
 from companies_watch.config import get_settings
 from companies_watch.retry import call_with_retry
@@ -25,6 +27,7 @@ from companies_watch.status import load_status, render
 from companies_watch.store import (
     add_to_watchlist,
     claim_due,
+    import_watchlist,
     mark_failure,
     mark_gone,
     mark_success,
@@ -195,3 +198,76 @@ def cmd_status() -> None:
     ) as conn:
         status = load_status(conn)
     print(render(status, STALE_AFTER))
+
+
+def parse_numbers(lines: Iterable[str]) -> tuple[list[str], list[str]]:
+    good: dict[str, None] = {}
+    bad: list[str] = []
+    for line in lines:
+        raw = line.split("#", 1)[0].strip()
+        if not raw:
+            continue
+        try:
+            good[normalize_number(raw)] = None
+        except ValueError:
+            bad.append(raw)
+    return list(good), bad
+
+
+def cmd_discover(
+    *,
+    status: str | None,
+    sic_codes: list[str] | None,
+    incorporated_from: date | None,
+    incorporated_to: date | None,
+    size: int,
+) -> int:
+    if not 1 <= size <= 5000:
+        log.error("size must be between 1 and 5000, got %d", size)
+        return 2
+
+    settings = get_settings()
+
+    with make_client(settings.ch_api_key.get_secret_value()) as client:
+        numbers = search_companies(
+            client,
+            status=status,
+            sic_codes=sic_codes,
+            incorporated_from=incorporated_from,
+            incorporated_to=incorporated_to,
+            size=size,
+        )
+
+    for number in numbers:
+        print(number)
+    log.info("discovered %d companies", len(numbers))
+    return 0
+
+
+def cmd_watch_import(path: str) -> int:
+    if path == "-":
+        numbers, bad = parse_numbers(sys.stdin)
+    else:
+        with open(path, encoding="utf-8-sig") as f:
+            numbers, bad = parse_numbers(f)
+
+    for raw in bad:
+        log.warning("skipped invalid number %r", raw)
+    if not numbers:
+        log.error("no valid company numbers in %s", path)
+        return 2
+
+    settings = get_settings()
+
+    with psycopg.connect(
+        settings.database_url, autocommit=True, connect_timeout=5
+    ) as conn:
+        added = import_watchlist(conn, numbers)
+
+    log.info(
+        "imported %d new, %d already watched, %d invalid",
+        added,
+        len(numbers) - added,
+        len(bad),
+    )
+    return 0
