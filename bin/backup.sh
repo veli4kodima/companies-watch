@@ -35,6 +35,7 @@ NAME="companies-watch-$(date -u +%Y%m%dT%H%M%SZ).dump.age"
 
 pg_dump --format=custom --no-owner "$DATABASE_URL" > "$WORK/db.dump"
 pg_restore --list "$WORK/db.dump" > /dev/null
+psql "$DATABASE_URL" -At -F ' ' -f bin/row-counts.sql > "$WORK/$NAME.counts"
 age -r "$RECIPIENT" -o "$WORK/$NAME" "$WORK/db.dump"
 
 LOCAL_SIZE=$(stat -c %s "$WORK/$NAME")
@@ -56,5 +57,6 @@ fi
 
 echo "$LOCAL_SHA  $NAME" > "$WORK/$NAME.sha256"
 rc copyto "$WORK/$NAME.sha256" "b2:$BUCKET/$NAME.sha256"
+rc copyto "$WORK/$NAME.counts" "b2:$BUCKET/$NAME.counts"
 
 echo "backup ok: $NAME, $LOCAL_SIZE bytes, sha256 $LOCAL_SHA" >&2
