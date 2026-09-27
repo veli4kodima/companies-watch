@@ -32,10 +32,11 @@ RUNNING_SQL = """
     order by started_at
 """
 
-LAST_COMPLETED_SQL = """
+LAST_SUCCESS_SQL = """
     select now() - max(finished_at)
     from refresh_log
     where status = 'completed'
+      and ok_count + gone_count > 0
 """
 
 QUEUE_SQL = """
@@ -112,7 +113,7 @@ class PausedCompany:
 class Status:
     last_run: LastRun | None
     running: list[RunningRun]
-    last_completed_ago: timedelta | None
+    last_success_ago: timedelta | None
     queue: QueueSummary
     paused: list[PausedCompany]
     changes_24h: int
@@ -133,9 +134,9 @@ def load_status(conn: Connection[TupleRow]) -> Status:
     with conn.cursor(row_factory=class_row(PausedCompany)) as cur:
         paused = cur.execute(PAUSED_SQL).fetchall()
 
-    row = conn.execute(LAST_COMPLETED_SQL).fetchone()
+    row = conn.execute(LAST_SUCCESS_SQL).fetchone()
     assert row is not None
-    last_completed_ago: timedelta | None = row[0]
+    last_success_ago: timedelta | None = row[0]
 
     row = conn.execute(CHANGES_SQL).fetchone()
     assert row is not None
@@ -143,12 +144,16 @@ def load_status(conn: Connection[TupleRow]) -> Status:
     return Status(
         last_run=last_run,
         running=running,
-        last_completed_ago=last_completed_ago,
+        last_success_ago=last_success_ago,
         queue=queue,
         paused=paused,
         changes_24h=int(row[0]),
         changed_companies_24h=int(row[1]),
     )
+
+
+def plural(n: int, one: str, many: str) -> str:
+    return f"{n} {one if n == 1 else many}"
 
 
 def fmt_duration(td: timedelta) -> str:
@@ -202,10 +207,10 @@ def render(status: Status, stale_after: timedelta) -> str:
                 f"{r.ok_count}/{r.taken_count} done{mark}"
             )
 
-    if status.last_completed_ago is None:
+    if status.last_success_ago is None:
         lines.append("Last success  never")
     else:
-        lines.append(f"Last success  {fmt_duration(status.last_completed_ago)} ago")
+        lines.append(f"Last success  {fmt_duration(status.last_success_ago)} ago")
 
     q = status.queue
     if q.next_check_in is None:
@@ -218,8 +223,8 @@ def render(status: Status, stale_after: timedelta) -> str:
     lines.append(f"              paused {q.paused}, gone {q.gone}")
 
     lines.append(
-        f"Changes 24h   {status.changes_24h} fields "
-        f"in {status.changed_companies_24h} companies"
+        f"Changes 24h   {plural(status.changes_24h, 'field', 'fields')} "
+        f"in {plural(status.changed_companies_24h, 'company', 'companies')}"
     )
 
     if status.paused:

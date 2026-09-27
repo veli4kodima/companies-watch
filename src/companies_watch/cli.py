@@ -2,10 +2,12 @@ import argparse
 import sys
 from datetime import date
 
+import httpx
 import psycopg
 from pydantic import ValidationError
 
 from companies_watch import migrate
+from companies_watch.client import CompanyNotFound
 from companies_watch.commands import (
     cmd_discover,
     cmd_fetch,
@@ -103,6 +105,15 @@ def main() -> int:
     except psycopg.OperationalError as exc:
         print(f"database unavailable: {exc}", file=sys.stderr)
         return 3
+    except psycopg.Error as exc:
+        print(f"database error: {exc}", file=sys.stderr)
+        return 4
+    except CompanyNotFound as exc:
+        print(f"company not found: {exc}", file=sys.stderr)
+        return 5
+    except httpx.HTTPError as exc:
+        print(f"api error: {exc}", file=sys.stderr)
+        return 5
     except KeyboardInterrupt:
         print("interrupted", file=sys.stderr)
         return 130

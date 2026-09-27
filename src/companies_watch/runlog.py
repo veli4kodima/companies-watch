@@ -1,9 +1,12 @@
+import logging
 from dataclasses import asdict, dataclass
 from datetime import timedelta
 from typing import Literal
 
 from psycopg import Connection
 from psycopg.rows import TupleRow
+
+log = logging.getLogger(__name__)
 
 
 @dataclass
@@ -64,7 +67,7 @@ def finish_run(
 ) -> None:
     with conn.transaction():
         update_run(conn, run_id, stats)
-        conn.execute(
+        cur = conn.execute(
             """
             update refresh_log
             set status        = %(status)s,
@@ -75,3 +78,9 @@ def finish_run(
             """,
             {"id": run_id, "status": status, "error": error},
         )
+        if cur.rowcount == 0:
+            log.warning(
+                "run #%d was already closed (abandoned?), status %s not recorded",
+                run_id,
+                status,
+            )
