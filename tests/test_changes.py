@@ -1,6 +1,8 @@
+from typing import Any
+
 from companies_watch.changes import diff_fields
 
-BASE = {
+BASE: dict[str, Any] = {
     "company_number": "00000006",
     "company_name": "ACME LTD",
     "company_status": "active",
