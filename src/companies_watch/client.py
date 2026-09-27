@@ -13,7 +13,10 @@ class CompanyNotFound(Exception):
 
 
 def normalize_number(raw: str) -> str:
-    number = raw.strip().upper().zfill(8)
+    stripped = raw.strip().upper()
+    if not stripped:
+        raise ValueError("empty company number")
+    number = stripped.zfill(8)
     if not NUMBER_RE.fullmatch(number):
         raise ValueError(f"invalid company number: {raw!r}")
     return number
