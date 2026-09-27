@@ -12,6 +12,22 @@ class CompanyNotFound(Exception):
     pass
 
 
+class BadResponse(Exception):
+    pass
+
+
+def validate_company(data: object, number: str) -> dict[str, Any]:
+    if not isinstance(data, dict):
+        raise BadResponse(
+            f"{number}: expected a JSON object, got {type(data).__name__}"
+        )
+    if data.get("company_number") != number:
+        raise BadResponse(f"{number}: response is for {data.get('company_number')!r}")
+    if not isinstance(data.get("company_name"), str):
+        raise BadResponse(f"{number}: missing company_name")
+    return data
+
+
 def normalize_number(raw: str) -> str:
     stripped = raw.strip().upper()
     if not stripped:
@@ -36,8 +52,11 @@ def get_company(client: httpx.Client, number: str) -> dict[str, Any]:
     if response.status_code == 404:
         raise CompanyNotFound(number)
     response.raise_for_status()
-    data: dict[str, Any] = response.json()
-    return data
+    try:
+        data = response.json()
+    except ValueError as exc:
+        raise BadResponse(f"{number}: response is not JSON") from exc
+    return validate_company(data, number)
 
 
 def search_companies(

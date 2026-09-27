@@ -140,6 +140,7 @@ produces a clean file.
 | Corrupted or truncated backup | Checksum and size mismatch against the downloaded copy | `bin/backup.sh` |
 | Backup that cannot be restored | Restore drill with row-count comparison | `bin/restore.sh` |
 | Garbage company number (`../../etc`, empty) | Rejected before any request | `test_client.py` |
+| Malformed response (not JSON, wrong shape, another company) | That company counts as a failure, the run continues | `test_client.py` |
 
 Tests run against a real PostgreSQL (created and migrated per session), not mocks. Tests that
 need the database are skipped, not failed, when it is not available.
@@ -235,8 +236,6 @@ tests/
 
 ## Known limitations
 
-- A response with an unexpected shape (for example, a missing `company_name`) currently fails the
-  whole run instead of that one company.
 - The backup row-count manifest is taken right after `pg_dump`, not in the same snapshot. A run
   writing in between would make counts differ. Backups run at 03:17 while runs start at :07 and
   take seconds, so this is accepted, not guaranteed.

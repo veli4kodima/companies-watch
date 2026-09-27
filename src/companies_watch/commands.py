@@ -8,6 +8,7 @@ import httpx
 import psycopg
 
 from companies_watch.client import (
+    BadResponse,
     CompanyNotFound,
     get_company,
     make_client,
@@ -148,7 +149,7 @@ def cmd_run(limit: int) -> int:
                                 update_run(conn, run_id, stats)
                             log.info("gone %s", number)
                             continue
-                        except httpx.HTTPError as exc:
+                        except (httpx.HTTPError, BadResponse) as exc:
                             with conn.transaction():
                                 paused = mark_failure(
                                     conn, number, RETRY_INTERVAL, MAX_FAILS
